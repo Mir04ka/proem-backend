@@ -55,6 +55,10 @@ func main() {
 
 	jwtManager := token.NewJWTManager(cfg.JWTSecret, cfg.TokenTTL)
 	mailerService := service.NewMailerService(cfg)
+	storageService, err := service.NewLocalStorageService(cfg)
+	if err != nil {
+		log.Fatalf("Storage service initialization failed: %v", err)
+	}
 
 	userRepo := repository.NewUserRepository(dbPool)
 	articleRepo := repository.NewArticleRepository(dbPool)
@@ -64,38 +68,63 @@ func main() {
 
 	authHandler := handler.NewAuthHandler(authService)
 	articleHandler := handler.NewArticleHandler(articleService)
+	uploadHandler := handler.NewUploadHandler(storageService)
 
 	router := gin.Default()
 	router.Use(gin.Recovery())
 	router.Use(gin.Logger())
 	router.Use(middleware.CORSMiddleware())
 
+	// Раздача загруженных изображений
+	router.Static("/uploads", cfg.UploadDir)
+
+	authMiddleware := middleware.AuthMiddleware(jwtManager)
+
 	api := router.Group("/api/v1")
 	{
-		// Auth
+		// 1. Авторизация
 		auth := api.Group("/auth")
 		{
 			auth.POST("/register", authHandler.Register)
 			auth.GET("/verify", authHandler.VerifyEmail)
 			auth.POST("/login", authHandler.Login)
+			auth.POST("/change-password", authMiddleware, authHandler.ChangePassword)
 		}
 
-		// Public articles
+		// 2. Пользователи
+		users := api.Group("/users")
+		{
+			users.GET("/:id", authHandler.GetProfile)
+			users.GET("/:id/articles", articleHandler.ListByUser)
+		}
+
+		// 3. Статьи (регистрируем маршруты напрямую без вложенного Group(""))
 		articles := api.Group("/articles")
 		{
 			articles.GET("", articleHandler.List)
 			articles.GET("/:id", articleHandler.GetByID)
-			articles.GET("/slug/:slug", articleHandler.GetBySlug)
+			articles.GET("/:id/comments", articleHandler.GetComments)
 
-			// Закрытые маршруты для авторизованных авторов
-			protected := articles.Group("")
-			protected.Use(middleware.AuthMiddleware(jwtManager))
-			{
-				protected.POST("", articleHandler.Publish)
-				protected.PUT("/:id", articleHandler.Update)
-			}
+			// Закрытые маршруты статей
+			articles.POST("", authMiddleware, articleHandler.Publish)
+			articles.PUT("/:id", authMiddleware, articleHandler.Update)
+			articles.POST("/:id/vote", authMiddleware, articleHandler.Vote)
+			articles.POST("/:id/comments", authMiddleware, articleHandler.AddComment)
+		}
+
+		// 4. Загрузка картинок
+		media := api.Group("/media")
+		{
+			media.POST("/upload", authMiddleware, uploadHandler.UploadImage)
 		}
 	}
+
+	// Выводим все зарегистрированные маршруты в лог при старте
+	log.Println("--- REGISTERED ROUTES ---")
+	for _, r := range router.Routes() {
+		log.Printf("[ROUTE] %-6s %s\n", r.Method, r.Path)
+	}
+	log.Println("-------------------------")
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

@@ -17,10 +17,12 @@ FROM alpine:3.20
 
 WORKDIR /app
 
+# Создаем группу и пользователя с UID:GID 1000:1000
 RUN apk add --no-cache ca-certificates tzdata && \
-    addgroup -S appgroup && adduser -S appuser -G appgroup
+    addgroup -g 1000 appgroup && \
+    adduser -u 1000 -G appgroup -D appuser
 
-COPY --from=builder /app/bin/api /app/api
+COPY --from=builder --chown=appuser:appgroup /app/bin/api /app/api
 
 USER appuser
 

@@ -20,18 +20,13 @@ func NewArticleHandler(as service.ArticleService) *ArticleHandler {
 }
 
 type articleUpsertDTO struct {
-	Title   string `json:"title" binding:"required,min=3"`
-	Content string `json:"content" binding:"required"`
+	Title   string   `json:"title" binding:"required,min=3"`
+	Content string   `json:"content" binding:"required"`
+	Tags    []string `json:"tags"`
 }
 
-// Publish — публикация новой статьи (только для авторизованных)
 func (h *ArticleHandler) Publish(c *gin.Context) {
-	userIDVal, exists := c.Get(middleware.CtxUserIDKey)
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-	authorID := userIDVal.(uuid.UUID)
+	authorID := c.MustGet(middleware.CtxUserIDKey).(uuid.UUID)
 
 	var dto articleUpsertDTO
 	if err := c.ShouldBindJSON(&dto); err != nil {
@@ -39,24 +34,16 @@ func (h *ArticleHandler) Publish(c *gin.Context) {
 		return
 	}
 
-	article, err := h.articleService.Publish(c.Request.Context(), authorID, dto.Title, dto.Content)
+	article, err := h.articleService.Publish(c.Request.Context(), authorID, dto.Title, dto.Content, dto.Tags)
 	if err != nil {
 		HandleError(c, err)
 		return
 	}
-
 	c.JSON(http.StatusCreated, article)
 }
 
-// Update — редактирование опубликованной статьи
 func (h *ArticleHandler) Update(c *gin.Context) {
-	userIDVal, exists := c.Get(middleware.CtxUserIDKey)
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-	authorID := userIDVal.(uuid.UUID)
-
+	authorID := c.MustGet(middleware.CtxUserIDKey).(uuid.UUID)
 	articleID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid article ID"})
@@ -69,12 +56,11 @@ func (h *ArticleHandler) Update(c *gin.Context) {
 		return
 	}
 
-	article, err := h.articleService.Update(c.Request.Context(), authorID, articleID, dto.Title, dto.Content)
+	article, err := h.articleService.Update(c.Request.Context(), authorID, articleID, dto.Title, dto.Content, dto.Tags)
 	if err != nil {
 		HandleError(c, err)
 		return
 	}
-
 	c.JSON(http.StatusOK, article)
 }
 
@@ -93,16 +79,6 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 	c.JSON(http.StatusOK, article)
 }
 
-func (h *ArticleHandler) GetBySlug(c *gin.Context) {
-	slug := c.Param("slug")
-	article, err := h.articleService.GetBySlug(c.Request.Context(), slug)
-	if err != nil {
-		HandleError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, article)
-}
-
 func (h *ArticleHandler) List(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
@@ -113,4 +89,93 @@ func (h *ArticleHandler) List(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, articles)
+}
+
+func (h *ArticleHandler) ListByUser(c *gin.Context) {
+	authorID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid author ID"})
+		return
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	articles, err := h.articleService.ListByAuthor(c.Request.Context(), authorID, limit, offset)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, articles)
+}
+
+// POST /api/v1/articles/:id/vote
+type voteDTO struct {
+	Value int16 `json:"value" binding:"required,oneof=1 -1"`
+}
+
+func (h *ArticleHandler) Vote(c *gin.Context) {
+	userID := c.MustGet(middleware.CtxUserIDKey).(uuid.UUID)
+	articleID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid article ID"})
+		return
+	}
+
+	var dto voteDTO
+	if err := c.ShouldBindJSON(&dto); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Value must be 1 or -1"})
+		return
+	}
+
+	score, err := h.articleService.Vote(c.Request.Context(), articleID, userID, dto.Value)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"rating_score": score})
+}
+
+// GET /api/v1/articles/:id/comments
+func (h *ArticleHandler) GetComments(c *gin.Context) {
+	articleID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid article ID"})
+		return
+	}
+
+	comments, err := h.articleService.GetComments(c.Request.Context(), articleID)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, comments)
+}
+
+// POST /api/v1/articles/:id/comments
+type commentDTO struct {
+	Content string `json:"content" binding:"required,min=1"`
+}
+
+func (h *ArticleHandler) AddComment(c *gin.Context) {
+	userID := c.MustGet(middleware.CtxUserIDKey).(uuid.UUID)
+	articleID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid article ID"})
+		return
+	}
+
+	var dto commentDTO
+	if err := c.ShouldBindJSON(&dto); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	comment, err := h.articleService.AddComment(c.Request.Context(), articleID, userID, dto.Content)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, comment)
 }

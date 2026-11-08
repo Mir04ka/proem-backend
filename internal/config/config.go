@@ -22,6 +22,7 @@ type Config struct {
 	SMTPUser    string
 	SMTPPass    string
 	SMTPFrom    string
+	UploadDir   string
 }
 
 func Load() *Config {
@@ -57,6 +58,7 @@ func Load() *Config {
 		SMTPUser:    os.Getenv("SMTP_USER"),
 		SMTPPass:    os.Getenv("SMTP_PASS"),
 		SMTPFrom:    getEnv("SMTP_FROM", "noreply@example.com"),
+		UploadDir:   getEnv("UPLOAD_DIR", "./uploads"),
 	}
 }
 

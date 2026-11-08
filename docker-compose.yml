@@ -27,6 +27,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - UPLOAD_DIR=/app/uploads
     ports:
       - "${PORT}:${PORT}"
     depends_on:
@@ -34,6 +36,8 @@ services:
         condition: service_healthy
     networks:
       - proem_net
+    volumes:
+      - ./uploads:/app/uploads
 
 volumes:
   pgdata:
