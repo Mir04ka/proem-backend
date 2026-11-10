@@ -98,12 +98,11 @@ func (r *articleRepo) syncTags(ctx context.Context, tx pgx.Tx, articleID uuid.UU
 func (r *articleRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Article, error) {
 	query := `
 		SELECT a.id, a.author_id, u.username, u.email, a.title, a.content, a.is_published,
-		       COALESCE(SUM(v.value), 0) AS rating_score,
+		       (SELECT COALESCE(SUM(value), 0) FROM article_votes WHERE article_id = a.id) AS rating,
 		       COALESCE(array_remove(array_agg(DISTINCT t.name), NULL), '{}') AS tags,
 		       a.created_at, a.updated_at
 		FROM articles a
 		JOIN users u ON a.author_id = u.id
-		LEFT JOIN article_votes v ON a.id = v.article_id
 		LEFT JOIN article_tags at ON a.id = at.article_id
 		LEFT JOIN tags t ON at.tag_id = t.id
 		WHERE a.id = $1
@@ -206,7 +205,11 @@ func (r *articleRepo) AddComment(ctx context.Context, c *domain.Comment) error {
 		VALUES ($1, $2, $3, $4, $5, $6)
 	`
 	_, err := r.db.Exec(ctx, query, c.ID, c.ArticleID, c.AuthorID, c.Content, c.CreatedAt, c.UpdatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+
+	return r.db.QueryRow(ctx, `SELECT username FROM users WHERE id = $1`, c.AuthorID).Scan(&c.AuthorUsername)
 }
 
 func (r *articleRepo) GetComments(ctx context.Context, articleID uuid.UUID) ([]*domain.Comment, error) {
