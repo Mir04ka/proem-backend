@@ -68,6 +68,7 @@ func main() {
 
 	authHandler := handler.NewAuthHandler(authService)
 	articleHandler := handler.NewArticleHandler(articleService)
+	adminHandler := handler.NewAdminHandler(articleService)
 	uploadHandler := handler.NewUploadHandler(storageService)
 
 	router := gin.Default()
@@ -79,10 +80,11 @@ func main() {
 	router.Static("/uploads", cfg.UploadDir)
 
 	authMiddleware := middleware.AuthMiddleware(jwtManager)
+	adminMiddleware := middleware.AdminMiddleware(userRepo)
 
 	api := router.Group("/api/v1")
 	{
-		// 1. Авторизация
+		// Auth
 		auth := api.Group("/auth")
 		{
 			auth.POST("/register", authHandler.Register)
@@ -91,28 +93,43 @@ func main() {
 			auth.POST("/change-password", authMiddleware, authHandler.ChangePassword)
 		}
 
-		// 2. Пользователи
+		// Users
 		users := api.Group("/users")
 		{
+			users.GET("", authHandler.ListUsers)
 			users.GET("/:id", authHandler.GetProfile)
 			users.GET("/:id/articles", articleHandler.ListByUser)
 		}
+		api.GET("/u/:nick", authHandler.GetProfileByUsername)
 
-		// 3. Статьи (регистрируем маршруты напрямую без вложенного Group(""))
+		// Articles
 		articles := api.Group("/articles")
 		{
 			articles.GET("", articleHandler.List)
-			articles.GET("/:id", articleHandler.GetByID)
-			articles.GET("/:id/comments", articleHandler.GetComments)
-
-			// Закрытые маршруты статей
 			articles.POST("", authMiddleware, articleHandler.Publish)
-			articles.PUT("/:id", authMiddleware, articleHandler.Update)
-			articles.POST("/:id/vote", authMiddleware, articleHandler.Vote)
-			articles.POST("/:id/comments", authMiddleware, articleHandler.AddComment)
 		}
 
-		// 4. Загрузка картинок
+		// An article
+		articleSingle := api.Group("/a")
+		{
+			articleSingle.GET("/:id", articleHandler.GetByID)
+			articleSingle.GET("/:id/comments", articleHandler.GetComments)
+
+			articleSingle.PUT("/:id", authMiddleware, articleHandler.Update)
+			articleSingle.POST("/:id/vote", authMiddleware, articleHandler.Vote)
+			articleSingle.POST("/:id/comments", authMiddleware, articleHandler.AddComment)
+		}
+
+		// Admin API
+		admin := api.Group("/admin", authMiddleware, adminMiddleware)
+		{
+			admin.GET("/articles/requests", adminHandler.ListModerationRequests)
+			admin.POST("/articles/:id/approve", adminHandler.ApproveArticle)
+			admin.POST("/articles/:id/reject", adminHandler.RejectArticle)
+			admin.POST("/articles/:id/unpublish", adminHandler.UnpublishArticle)
+		}
+
+		// Media
 		media := api.Group("/media")
 		{
 			media.POST("/upload", authMiddleware, uploadHandler.UploadImage)

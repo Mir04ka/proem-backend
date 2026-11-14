@@ -22,11 +22,11 @@ func NewUserRepository(db *pgxpool.Pool) domain.UserRepository {
 
 func (r *userRepo) Create(ctx context.Context, u *domain.User) error {
 	query := `
-		INSERT INTO users (id, username, email, password_hash, is_verified, verification_token, verification_expires_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO users (id, username, email, password_hash, role, is_verified, verification_token, verification_expires_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 	_, err := r.db.Exec(ctx, query,
-		u.ID, u.Username, u.Email, u.PasswordHash, u.IsVerified,
+		u.ID, u.Username, u.Email, u.PasswordHash, u.Role, u.IsVerified,
 		u.VerificationToken, u.VerificationExpiresAt, u.CreatedAt, u.UpdatedAt,
 	)
 	if err != nil {
@@ -42,14 +42,10 @@ func (r *userRepo) Create(ctx context.Context, u *domain.User) error {
 	return nil
 }
 
-func (r *userRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
-	query := `
-		SELECT id, username, email, password_hash, is_verified, verification_token, verification_expires_at, created_at, updated_at
-		FROM users WHERE id = $1
-	`
+func (r *userRepo) getOne(ctx context.Context, query string, arg interface{}) (*domain.User, error) {
 	u := &domain.User{}
-	err := r.db.QueryRow(ctx, query, id).Scan(
-		&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.IsVerified,
+	err := r.db.QueryRow(ctx, query, arg).Scan(
+		&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &u.IsVerified,
 		&u.VerificationToken, &u.VerificationExpiresAt, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
@@ -59,74 +55,69 @@ func (r *userRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, err
 		return nil, err
 	}
 	return u, nil
+}
+
+func (r *userRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+	return r.getOne(ctx, `
+		SELECT id, username, email, password_hash, role, is_verified, verification_token, verification_expires_at, created_at, updated_at
+		FROM users WHERE id = $1
+	`, id)
 }
 
 func (r *userRepo) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
-	query := `
-		SELECT id, username, email, password_hash, is_verified, verification_token, verification_expires_at, created_at, updated_at
+	return r.getOne(ctx, `
+		SELECT id, username, email, password_hash, role, is_verified, verification_token, verification_expires_at, created_at, updated_at
 		FROM users WHERE email = $1
-	`
-	u := &domain.User{}
-	err := r.db.QueryRow(ctx, query, email).Scan(
-		&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.IsVerified,
-		&u.VerificationToken, &u.VerificationExpiresAt, &u.CreatedAt, &u.UpdatedAt,
-	)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, domain.ErrNotFound
-		}
-		return nil, err
-	}
-	return u, nil
+	`, email)
 }
 
 func (r *userRepo) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
-	query := `
-		SELECT id, username, email, password_hash, is_verified, verification_token, verification_expires_at, created_at, updated_at
+	return r.getOne(ctx, `
+		SELECT id, username, email, password_hash, role, is_verified, verification_token, verification_expires_at, created_at, updated_at
 		FROM users WHERE username = $1
-	`
-	u := &domain.User{}
-	err := r.db.QueryRow(ctx, query, username).Scan(
-		&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.IsVerified,
-		&u.VerificationToken, &u.VerificationExpiresAt, &u.CreatedAt, &u.UpdatedAt,
-	)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, domain.ErrNotFound
-		}
-		return nil, err
-	}
-	return u, nil
+	`, username)
 }
 
 func (r *userRepo) GetByVerificationToken(ctx context.Context, token string) (*domain.User, error) {
-	query := `
-		SELECT id, username, email, password_hash, is_verified, verification_token, verification_expires_at, created_at, updated_at
+	return r.getOne(ctx, `
+		SELECT id, username, email, password_hash, role, is_verified, verification_token, verification_expires_at, created_at, updated_at
 		FROM users WHERE verification_token = $1
+	`, token)
+}
+
+func (r *userRepo) List(ctx context.Context, limit, offset int) ([]*domain.UserProfile, error) {
+	query := `
+		SELECT id, username, created_at
+		FROM users
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
 	`
-	u := &domain.User{}
-	err := r.db.QueryRow(ctx, query, token).Scan(
-		&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.IsVerified,
-		&u.VerificationToken, &u.VerificationExpiresAt, &u.CreatedAt, &u.UpdatedAt,
-	)
+	rows, err := r.db.Query(ctx, query, limit, offset)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, domain.ErrNotFound
-		}
 		return nil, err
 	}
-	return u, nil
+	defer rows.Close()
+
+	users := make([]*domain.UserProfile, 0)
+	for rows.Next() {
+		u := &domain.UserProfile{}
+		if err := rows.Scan(&u.ID, &u.Username, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, nil
 }
 
 func (r *userRepo) Update(ctx context.Context, u *domain.User) error {
 	query := `
 		UPDATE users
-		SET username = $2, email = $3, password_hash = $4, is_verified = $5,
-		    verification_token = $6, verification_expires_at = $7, updated_at = $8
+		SET username = $2, email = $3, password_hash = $4, role = $5, is_verified = $6,
+		    verification_token = $7, verification_expires_at = $8, updated_at = $9
 		WHERE id = $1
 	`
 	_, err := r.db.Exec(ctx, query,
-		u.ID, u.Username, u.Email, u.PasswordHash, u.IsVerified,
+		u.ID, u.Username, u.Email, u.PasswordHash, u.Role, u.IsVerified,
 		u.VerificationToken, u.VerificationExpiresAt, u.UpdatedAt,
 	)
 	return err

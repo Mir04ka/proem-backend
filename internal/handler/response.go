@@ -19,7 +19,12 @@ func HandleError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 	case errors.Is(err, domain.ErrEmailNotVerified), errors.Is(err, domain.ErrForbidden):
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
-	case errors.Is(err, domain.ErrInvalidToken), errors.Is(err, domain.ErrInvalidFileFormat), errors.Is(err, domain.ErrFileSizeTooLarge):
+	case errors.Is(err, domain.ErrInvalidToken),
+		errors.Is(err, domain.ErrInvalidFileFormat),
+		errors.Is(err, domain.ErrFileSizeTooLarge),
+		errors.Is(err, domain.ErrInvalidUsername),
+		errors.Is(err, domain.ErrInvalidParentComment),
+		errors.Is(err, domain.ErrArticleNotPending):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})

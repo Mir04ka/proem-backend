@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"regexp"
 	"time"
 
 	"proem-backend/internal/domain"
@@ -13,12 +14,16 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+var usernameRegex = regexp.MustCompile(`^[a-z0-9_]{3,20}$`)
+
 type AuthService interface {
 	Register(ctx context.Context, username, email, password string) error
 	VerifyEmail(ctx context.Context, verificationToken string) error
 	Login(ctx context.Context, email, password string) (string, *domain.User, error)
 	ChangePassword(ctx context.Context, userID uuid.UUID, oldPassword, newPassword string) error
 	GetProfile(ctx context.Context, userID uuid.UUID) (*domain.UserProfile, error)
+	GetProfileByUsername(ctx context.Context, username string) (*domain.UserProfile, error)
+	ListUsers(ctx context.Context, limit, offset int) ([]*domain.UserProfile, error)
 }
 
 type authService struct {
@@ -32,6 +37,10 @@ func NewAuthService(repo domain.UserRepository, jwtMgr *token.JWTManager, mailer
 }
 
 func (s *authService) Register(ctx context.Context, username, email, password string) error {
+	if !usernameRegex.MatchString(username) {
+		return domain.ErrInvalidUsername
+	}
+
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
@@ -49,6 +58,7 @@ func (s *authService) Register(ctx context.Context, username, email, password st
 		Username:              username,
 		Email:                 email,
 		PasswordHash:          string(hash),
+		Role:                  domain.RoleUser,
 		IsVerified:            false,
 		VerificationToken:     &verToken,
 		VerificationExpiresAt: &expiresAt,
@@ -113,7 +123,6 @@ func (s *authService) ChangePassword(ctx context.Context, userID uuid.UUID, oldP
 		return err
 	}
 
-	// Проверяем старый пароль
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); err != nil {
 		return domain.ErrInvalidOldPassword
 	}
@@ -140,4 +149,27 @@ func (s *authService) GetProfile(ctx context.Context, userID uuid.UUID) (*domain
 		Username:  user.Username,
 		CreatedAt: user.CreatedAt,
 	}, nil
+}
+
+func (s *authService) GetProfileByUsername(ctx context.Context, username string) (*domain.UserProfile, error) {
+	user, err := s.userRepo.GetByUsername(ctx, username)
+	if err != nil {
+		return nil, err
+	}
+
+	return &domain.UserProfile{
+		ID:        user.ID,
+		Username:  user.Username,
+		CreatedAt: user.CreatedAt,
+	}, nil
+}
+
+func (s *authService) ListUsers(ctx context.Context, limit, offset int) ([]*domain.UserProfile, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return s.userRepo.List(ctx, limit, offset)
 }

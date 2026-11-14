@@ -7,11 +7,17 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	RoleUser  = "user"
+	RoleAdmin = "admin"
+)
+
 type User struct {
 	ID                    uuid.UUID  `json:"id"`
 	Username              string     `json:"username"`
 	Email                 string     `json:"email"`
 	PasswordHash          string     `json:"-"`
+	Role                  string     `json:"role"`
 	IsVerified            bool       `json:"is_verified"`
 	VerificationToken     *string    `json:"-"`
 	VerificationExpiresAt *time.Time `json:"-"`
@@ -31,5 +37,6 @@ type UserRepository interface {
 	GetByEmail(ctx context.Context, email string) (*User, error)
 	GetByUsername(ctx context.Context, username string) (*User, error)
 	GetByVerificationToken(ctx context.Context, token string) (*User, error)
+	List(ctx context.Context, limit, offset int) ([]*UserProfile, error)
 	Update(ctx context.Context, user *User) error
 }

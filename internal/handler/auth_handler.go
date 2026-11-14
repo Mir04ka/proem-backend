@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"proem-backend/internal/middleware"
 	"proem-backend/internal/service"
@@ -19,7 +20,7 @@ func NewAuthHandler(as service.AuthService) *AuthHandler {
 }
 
 type registerDTO struct {
-	Username string `json:"username" binding:"required,min=3,max=50,alphanum"`
+	Username string `json:"username" binding:"required,min=3,max=20"`
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required,min=8"`
 }
@@ -120,5 +121,27 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 		return
 	}
 
+	c.JSON(http.StatusOK, profile)
+}
+
+func (h *AuthHandler) ListUsers(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	users, err := h.authService.ListUsers(c.Request.Context(), limit, offset)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, users)
+}
+
+func (h *AuthHandler) GetProfileByUsername(c *gin.Context) {
+	nick := c.Param("nick")
+	profile, err := h.authService.GetProfileByUsername(c.Request.Context(), nick)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, profile)
 }

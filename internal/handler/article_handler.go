@@ -20,9 +20,10 @@ func NewArticleHandler(as service.ArticleService) *ArticleHandler {
 }
 
 type articleUpsertDTO struct {
-	Title   string   `json:"title" binding:"required,min=3"`
-	Content string   `json:"content" binding:"required"`
-	Tags    []string `json:"tags"`
+	Title    string   `json:"title" binding:"required,min=3"`
+	Content  string   `json:"content" binding:"required"`
+	Tags     []string `json:"tags"`
+	IsPublic *bool    `json:"is_public"`
 }
 
 func (h *ArticleHandler) Publish(c *gin.Context) {
@@ -34,7 +35,12 @@ func (h *ArticleHandler) Publish(c *gin.Context) {
 		return
 	}
 
-	article, err := h.articleService.Publish(c.Request.Context(), authorID, dto.Title, dto.Content, dto.Tags)
+	isPublic := false
+	if dto.IsPublic != nil {
+		isPublic = *dto.IsPublic
+	}
+
+	article, err := h.articleService.Publish(c.Request.Context(), authorID, dto.Title, dto.Content, dto.Tags, isPublic)
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -56,7 +62,7 @@ func (h *ArticleHandler) Update(c *gin.Context) {
 		return
 	}
 
-	article, err := h.articleService.Update(c.Request.Context(), authorID, articleID, dto.Title, dto.Content, dto.Tags)
+	article, err := h.articleService.Update(c.Request.Context(), authorID, articleID, dto.Title, dto.Content, dto.Tags, dto.IsPublic)
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -155,7 +161,8 @@ func (h *ArticleHandler) GetComments(c *gin.Context) {
 
 // POST /api/v1/articles/:id/comments
 type commentDTO struct {
-	Content string `json:"content" binding:"required,min=1"`
+	ParentID *string `json:"parent_id"`
+	Content  string  `json:"content" binding:"required,min=1"`
 }
 
 func (h *ArticleHandler) AddComment(c *gin.Context) {
@@ -172,7 +179,17 @@ func (h *ArticleHandler) AddComment(c *gin.Context) {
 		return
 	}
 
-	comment, err := h.articleService.AddComment(c.Request.Context(), articleID, userID, dto.Content)
+	var parentID *uuid.UUID
+	if dto.ParentID != nil && *dto.ParentID != "" {
+		parsed, err := uuid.Parse(*dto.ParentID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid parent_id"})
+			return
+		}
+		parentID = &parsed
+	}
+
+	comment, err := h.articleService.AddComment(c.Request.Context(), articleID, userID, parentID, dto.Content)
 	if err != nil {
 		HandleError(c, err)
 		return
