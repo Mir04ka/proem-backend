@@ -1,0 +1,2 @@
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS views_count BIGINT NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_tags_name_lower ON tags (LOWER(name));

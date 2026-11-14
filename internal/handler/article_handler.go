@@ -88,8 +88,10 @@ func (h *ArticleHandler) GetByID(c *gin.Context) {
 func (h *ArticleHandler) List(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	query := c.Query("q")
+	tag := c.Query("tag")
 
-	articles, err := h.articleService.List(c.Request.Context(), limit, offset)
+	articles, err := h.articleService.List(c.Request.Context(), limit, offset, query, tag)
 	if err != nil {
 		HandleError(c, err)
 		return

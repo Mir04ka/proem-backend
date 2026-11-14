@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"proem-backend/internal/domain"
 
@@ -22,6 +24,8 @@ func NewArticleRepository(db *pgxpool.Pool) domain.ArticleRepository {
 const articleSelectFields = `
 	SELECT a.id, a.author_id, u.username, u.email, a.title, a.preview, a.content,
 	       a.is_published, a.visibility, a.moderation_status, a.moderation_reason,
+	       a.views_count,
+	       (SELECT COUNT(*) FROM comments WHERE article_id = a.id) AS comments_count,
 	       (SELECT COALESCE(SUM(value), 0) FROM article_votes WHERE article_id = a.id) AS rating,
 	       COALESCE(array_remove(array_agg(DISTINCT t.name), NULL), '{}') AS tags,
 	       a.created_at, a.updated_at
@@ -36,7 +40,7 @@ func scanArticle(row pgx.Row) (*domain.Article, error) {
 	err := row.Scan(
 		&a.ID, &a.AuthorID, &a.AuthorUsername, &a.AuthorEmail, &a.Title, &a.Preview, &a.Content,
 		&a.IsPublished, &a.Visibility, &a.ModerationStatus, &a.ModerationReason,
-		&a.Rating, &a.Tags, &a.CreatedAt, &a.UpdatedAt,
+		&a.ViewsCount, &a.CommentsCount, &a.Rating, &a.Tags, &a.CreatedAt, &a.UpdatedAt,
 	)
 	return a, err
 }
@@ -175,14 +179,50 @@ func (r *articleRepo) GetByIDAnyStatus(ctx context.Context, id uuid.UUID) (*doma
 	return a, nil
 }
 
-func (r *articleRepo) List(ctx context.Context, limit, offset int) ([]*domain.Article, error) {
-	query := articleSelectFields + `
-		WHERE a.is_published = TRUE AND a.visibility = 'public' AND a.moderation_status = 'approved'
-		GROUP BY a.id, u.username, u.email
-		ORDER BY a.created_at DESC
-		LIMIT $1 OFFSET $2
-	`
-	return r.fetchArticles(ctx, query, limit, offset)
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
+
+func (r *articleRepo) List(ctx context.Context, limit, offset int, searchQuery, tag string) ([]*domain.Article, error) {
+	conds := []string{
+		"a.is_published = TRUE",
+		"a.visibility = 'public'",
+		"a.moderation_status = 'approved'",
+	}
+	args := make([]interface{}, 0, 4)
+
+	if searchQuery != "" {
+		args = append(args, "%"+escapeLike(searchQuery)+"%")
+		idx := len(args)
+		conds = append(conds, fmt.Sprintf(`(
+			a.title ILIKE $%d ESCAPE '\'
+			OR EXISTS (
+				SELECT 1 FROM article_tags at2
+				JOIN tags t2 ON at2.tag_id = t2.id
+				WHERE at2.article_id = a.id AND t2.name ILIKE $%d ESCAPE '\'
+			)
+		)`, idx, idx))
+	}
+
+	if tag != "" {
+		args = append(args, tag)
+		idx := len(args)
+		conds = append(conds, fmt.Sprintf(`EXISTS (
+			SELECT 1 FROM article_tags at3
+			JOIN tags t3 ON at3.tag_id = t3.id
+			WHERE at3.article_id = a.id AND LOWER(t3.name) = LOWER($%d)
+		)`, idx))
+	}
+
+	args = append(args, limit, offset)
+	limitIdx := len(args) - 1
+	offsetIdx := len(args)
+
+	query := articleSelectFields +
+		" WHERE " + strings.Join(conds, " AND ") +
+		fmt.Sprintf(" GROUP BY a.id, u.username, u.email ORDER BY a.created_at DESC LIMIT $%d OFFSET $%d", limitIdx, offsetIdx)
+
+	return r.fetchArticles(ctx, query, args...)
 }
 
 func (r *articleRepo) ListByAuthorID(ctx context.Context, authorID uuid.UUID, limit, offset int) ([]*domain.Article, error) {
@@ -237,6 +277,15 @@ func (r *articleRepo) Vote(ctx context.Context, articleID, userID uuid.UUID, val
 	sumQuery := `SELECT COALESCE(SUM(value), 0) FROM article_votes WHERE article_id = $1`
 	err := r.db.QueryRow(ctx, sumQuery, articleID).Scan(&score)
 	return score, err
+}
+
+func (r *articleRepo) IncrementViews(ctx context.Context, id uuid.UUID) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE articles
+		SET views_count = views_count + 1
+		WHERE id = $1 AND is_published = TRUE
+	`, id)
+	return err
 }
 
 func (r *articleRepo) AddComment(ctx context.Context, c *domain.Comment) error {

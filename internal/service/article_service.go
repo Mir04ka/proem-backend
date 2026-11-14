@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"proem-backend/internal/domain"
@@ -13,13 +14,13 @@ type ArticleService interface {
 	Publish(ctx context.Context, authorID uuid.UUID, title, content string, tags []string, isPublic bool) (*domain.Article, error)
 	Update(ctx context.Context, authorID, articleID uuid.UUID, title, content string, tags []string, isPublic *bool) (*domain.Article, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Article, error)
-	List(ctx context.Context, limit, offset int) ([]*domain.Article, error)
+	List(ctx context.Context, limit, offset int, query, tag string) ([]*domain.Article, error)
 	ListByAuthor(ctx context.Context, authorID uuid.UUID, limit, offset int) ([]*domain.Article, error)
 	Vote(ctx context.Context, articleID, userID uuid.UUID, value int16) (int, error)
 	AddComment(ctx context.Context, articleID, authorID uuid.UUID, parentID *uuid.UUID, content string) (*domain.Comment, error)
 	GetComments(ctx context.Context, articleID uuid.UUID) ([]*domain.Comment, error)
 
-	// Админ-методы
+	// Admin only
 	ListModerationRequests(ctx context.Context, limit, offset int) ([]*domain.Article, error)
 	ApprovePublic(ctx context.Context, articleID uuid.UUID) error
 	RejectPublic(ctx context.Context, articleID uuid.UUID, reason *string) error
@@ -103,20 +104,23 @@ func (s *articleService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Art
 	if err != nil {
 		return nil, err
 	}
+	if err := s.repo.IncrementViews(ctx, id); err == nil {
+		article.ViewsCount++
+	}
 	if article.Preview == "" {
 		article.Preview = GeneratePreview(article.Content, 250)
 	}
 	return article, nil
 }
 
-func (s *articleService) List(ctx context.Context, limit, offset int) ([]*domain.Article, error) {
+func (s *articleService) List(ctx context.Context, limit, offset int, query, tag string) ([]*domain.Article, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 	if offset < 0 {
 		offset = 0
 	}
-	articles, err := s.repo.List(ctx, limit, offset)
+	articles, err := s.repo.List(ctx, limit, offset, strings.TrimSpace(query), strings.TrimSpace(tag))
 	if err != nil {
 		return nil, err
 	}
